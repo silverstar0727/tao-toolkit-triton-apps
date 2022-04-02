@@ -442,6 +442,7 @@ def main():
                 response, this_id, render=True
             ) # (batch_size, N_predicted_object)
 
+            # 이미지 단위로 처리... 병목 예상
             for postprocess_result in postprocess_results["batchwise_boxes"]:
                 pred_bboxes = []
                 pred_labels = []
