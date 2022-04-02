@@ -227,3 +227,7 @@ class DetectNetPostprocessor(Postprocessor):
             
                 for p in processes:
                     p.wait()
+
+        return {
+            "batchwise_boxes": batchwise_boxes
+        }

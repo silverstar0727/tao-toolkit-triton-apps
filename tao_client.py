@@ -53,6 +53,7 @@ from tao_triton.python.model.yolov3_model import YOLOv3Model
 from tao_triton.python.model.peoplesegnet_model import PeoplesegnetModel
 from tao_triton.python.model.retinanet_model import RetinanetModel
 from tao_triton.python.model.multitask_classification_model import MultitaskClassificationModel
+from tao_triton.python.utils.raw_metrics import RawMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +193,7 @@ def parse_command_line(args=None):
                         help='Input image / Input folder.')
     parser.add_argument('--class_list',
                         type=str,
-                        default="truck,bicycle,bus,motorcycle,pedestrian,car",
+                        default="car,bus,truck,motorcycle,pedestrian,bicycle",
                         help="Comma separated class names",
                         required=False)
     parser.add_argument('--output_path',
@@ -267,6 +268,8 @@ def main():
     npdtype = triton_to_np_dtype(triton_model.triton_dtype)
     max_batch_size = triton_model.max_batch_size
     frames = []
+    file_names = []
+
     if os.path.isdir(FLAGS.image_filename):
         frames = [
             Frame(os.path.join(FLAGS.image_filename, f),
@@ -277,6 +280,11 @@ def main():
             if os.path.isfile(os.path.join(FLAGS.image_filename, f)) and
             os.path.splitext(f)[-1] in [".jpg", ".jpeg", ".png"]
         ]
+
+        for f in os.listdir(FLAGS.image_filename):
+            if os.path.isfile(os.path.join(FLAGS.image_filename, f)) and \
+                (os.path.splitext(f)[-1] in [".jpg", ".jpeg", ".png"]):
+                    file_names.append(f.split(".")[0])
     else:
         frames = [
             Frame(os.path.join(FLAGS.image_filename),
@@ -417,6 +425,11 @@ def main():
 
     logger.info("Gathering responses from the server and post processing the inferenced outputs.")
     processed_request = 0
+
+    # raw metrics 로깅을 위한 인스턴스 생성
+    raw_metrics = RawMetrics()
+
+    cnt = 0
     with tqdm(total=len(frames)) as pbar:
         while processed_request < sent_count:
             response = responses[processed_request]
@@ -424,12 +437,39 @@ def main():
                 this_id = response.get_response().id
             else:
                 this_id = response.get_response()["id"]
-            postprocessor.apply(
+
+            postprocess_results = postprocessor.apply(
                 response, this_id, render=True
-            )
+            ) # (batch_size, N_predicted_object)
+
+            for postprocess_result in postprocess_results["batchwise_boxes"]:
+                pred_bboxes = []
+                pred_labels = []
+                for obj in postprocess_result:
+                    pred_bboxes.append(obj.box)
+                    pred_labels.append(obj.category)
+
+                # print(file_names[cnt], pred_bboxes, pred_labels)
+
+                try:
+                    raw_metrics_res = raw_metrics.get_raw_metrics(
+                        file_name=file_names[cnt],
+                        pred_bboxes=pred_bboxes,
+                        pred_labels=pred_labels,
+                        nms_thr=0.45, 
+                        score_thr=0.4, 
+                        iou_thr=0.5
+                    )
+                    cnt += 1
+                except:
+                    pass
+        
             processed_request += 1
             pbar.update(FLAGS.batch_size)
+    
     logger.info("PASS")
+    print(f"실제로 존재하는 객체 수: {raw_metrics.npos}")
+    print(f"confusion matrix: {raw_metrics_res}")
 
 if __name__ == '__main__':
     main()
